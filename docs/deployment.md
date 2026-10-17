@@ -136,7 +136,15 @@ done
 Always keep `data.csv` untouched, and never restore a whole `data/` backup without checking
 `mtime` first — a new recording can arrive between backup and restore.
 
-## 9. Housekeeping
+## 9. Diagnostics endpoints
+
+`web/diag.php` + `web/serial_diag.html` are a browser/USB diagnostic pair: they report whether
+the page runs in a WebView, the Chrome version, `navigator.serial`/`usb` availability and then
+test-read the port for 5 s, appending the result to `data/serial_diag.log`.
+Useful while setting up a phone, but `diag.php` is an unauthenticated endpoint that writes to
+disk — remove both files (or restrict them by IP) on a public deployment.
+
+## 10. Housekeeping
 
 - `data/history/` is pruned to the last N sessions by the engine (`archive_session(keep=…)`).
 - `data/analysis.log` grows; rotate it (logrotate or a cron `truncate`).
