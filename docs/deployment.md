@@ -136,7 +136,41 @@ done
 Always keep `data.csv` untouched, and never restore a whole `data/` backup without checking
 `mtime` first — a new recording can arrive between backup and restore.
 
-## 9. Diagnostics endpoints
+## 9. Restricting the service to the local network
+
+A dashboard that shows the **latest recording** displays personal health data, so the natural
+deployment is LAN-only. Apache evaluates the *real* client address (behind Cloudflare,
+`mod_remoteip` + `RemoteIPHeader CF-Connecting-IP` rewrites it), so a single directory block is
+enough — traffic that arrives through the CDN carries the client's public address and is refused:
+
+```apache
+# /etc/apache2/conf-available/ecg-local-only.conf  (a2enconf ecg-local-only)
+<Directory "/var/www/html/services/ecg">
+    Require ip 172.16.0.0/12 10.0.0.0/8 192.168.0.0/16 127.0.0.1 ::1                 <your-home-public-ipv4> <your-home-ipv6-prefix>::/64
+    ErrorDocument 403 "ECG service is available from the local network only."
+</Directory>
+```
+
+Why the home public addresses are listed as well: a client on the LAN may still resolve the
+hostname to the CDN (IPv6 AAAA record, DoH on a phone), and in that case the address Apache sees
+is the home egress address, not a private one. Listing the home IPv4 and the IPv6 prefix keeps
+that path working without opening the service to the internet.
+
+Add a **local DNS override** (A record → server's LAN address) on the LAN resolver as well, so
+devices take the direct path and keep using the valid certificate (Web Serial needs HTTPS).
+Verify from both sides:
+
+```bash
+# from the LAN — must be 200
+curl -sk --resolve ecg.example.com:443:192.168.1.10 https://ecg.example.com/ecg/index.php
+# from outside — must be 403 (a public proxy/status checker is enough)
+curl -s -o /dev/null -w '%{http_code}\n' https://ecg.example.com/ecg/index.php
+```
+
+Consequence worth knowing: the Android app uploads to the same hostname, so an upload made on
+mobile data will be refused by design — upload once back on the home network.
+
+## 10. Diagnostics endpoints
 
 `web/diag.php` + `web/serial_diag.html` are a browser/USB diagnostic pair: they report whether
 the page runs in a WebView, the Chrome version, `navigator.serial`/`usb` availability and then
@@ -144,7 +178,7 @@ test-read the port for 5 s, appending the result to `data/serial_diag.log`.
 Useful while setting up a phone, but `diag.php` is an unauthenticated endpoint that writes to
 disk — remove both files (or restrict them by IP) on a public deployment.
 
-## 10. Housekeeping
+## 11. Housekeeping
 
 - `data/history/` is pruned to the last N sessions by the engine (`archive_session(keep=…)`).
 - `data/analysis.log` grows; rotate it (logrotate or a cron `truncate`).
