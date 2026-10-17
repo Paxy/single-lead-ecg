@@ -23,8 +23,8 @@ comments. `# PAUSE`/`# RESUME`/`# GAP` are parsed into **dropped intervals**:
 - quality score is penalised for the dropped fraction (a recording with 22 % dropped time is
   "good", not "excellent").
 
-Why this matters: without it, a 29-minute recording with app pauses produced *125 fake
-"pauses in rhythm"* and a 36 s RR — a cardiological finding invented by a data hole.
+Why this matters: without it, a 30-minute recording with app pauses produced over a hundred fake
+"pauses in rhythm" and a ~36 s RR — a cardiological finding invented by a data hole.
 
 ## 2. Beat detection and the double-count trap
 
@@ -36,8 +36,8 @@ Why this matters: without it, a 29-minute recording with app pauses produced *12
    `peak_corr ≥ 0.30`).
 2. **Every second real beat removed** (the opposite error): if the removed peaks have a
    similar amplitude to the kept ones (`removed/kept > 0.60`) or more than 45 % of peaks were
-   removed, the correction is reverted. A recording of a true 79 bpm once came out as
-   **39 bpm** because the autocorrelation locked onto 2× the period and the correction then
+   removed, the correction is reverted. A recording of ~80 bpm once came out as
+   **40 bpm** because the autocorrelation locked onto 2× the period and the correction then
    deleted every other real R wave.
 
 Post-correction validation goes to an **independent** counter (5–25 Hz envelope + peak
@@ -59,7 +59,7 @@ rhythm and morphology are not interpreted and the report says so.
 
 Intervals are measured on the **median beat** of the 0.5–75 Hz signal (the 40 Hz low-pass used
 for detection artificially widens QRS; `dwt` on single beats tends to include neighbouring
-waves — on one recording it reported QRS 162 ms where the median beat gave 57 ms).
+waves — on one recording it reported QRS 162 ms where the median beat gave ~57 ms).
 
 | Interval | How | Rules that matter |
 |---|---|---|
@@ -75,7 +75,7 @@ Two systematic biases were found and fixed here, both worth knowing if you chang
 1. **Baseline taken at the start of the P window** sat on the slow ramp left by the 0.5 Hz
    high-pass after a large R wave → amplitude inflated (57 instead of 38 ADC) and onset moved
    125 ms to the left → **PR 224 ms ("first-degree AV block") on a recording whose PR is
-   141 ms**.
+   ~140 ms**.
 2. **Baseline window overlapping the Q wave** (QRS onset −50…−10 ms) drags the baseline down
    for narrow QRS → PR overestimated by ~25 ms (synthetic 180 ms came out as 208 ms).
 

@@ -69,7 +69,7 @@ Consequences, stated plainly:
 ## 5. Gain, saturation and the "top of the rail" problem
 
 The module's default gain is high enough that a normal R wave can reach the ADC rail
-(0 or 1023). In practice the R wave sat far too high on this build: about 1.7 % of samples
+(0 or 1023). In practice the R wave sat far too high on this build: in one build roughly 1–2 % of samples
 sat at the rail and the median peak-to-peak amplitude was ~800 of 1023.
 
 Symptoms of too much gain:
