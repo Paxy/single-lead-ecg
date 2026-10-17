@@ -1,40 +1,46 @@
 # ECG Recorder (Android)
 
-Aplikacija za duge snimke jednokanalnog ECG-a sa USB (CH340) uređaja preko OTG kabla.
-Snima u foreground servisu (radi i sa ugašenim ekranom), piše CSV koji ECG servis
-(`example.com/ecg`) direktno analizira, i sama šalje snimak na server.
+Long-recording app for a single-lead ECG streamed from a USB (CH340) device over an OTG cable.
+It records inside a foreground service (keeps working with the screen off), writes a CSV that the
+ECG service (`web/`) analyses directly, and uploads the recording when it stops.
 
-## Zašto postoji
+The in-app UI labels are in Serbian (`DOBAR` / `SLAB` / `OTPALA ELEKTRODA` / `SATURACIJA` = good /
+weak / electrode off / saturation); the CSV field names and the wire format are language-neutral.
 
-- **Web Serial u browseru** radi samo dok je strana otvorena i ekran uključen; za
-  10–30 min u ležećem položaju to puca (strana ode u pozadinu → veza se prekine).
-- **WebView (in-app browser)** ne podržava ni Web Serial ni WebUSB — nikad neće raditi.
-- Aplikacija koristi **Android USB Host API** (biblioteka `usb-serial-for-android`),
-  pa nema zavisnosti od browsera.
+## Why it exists
 
-## Funkcije
+- **Web Serial in the browser** only works while the page is open and the screen is on; for a
+  10–30 minute recording while lying down that breaks (the page goes to the background and the
+  connection is dropped).
+- **A WebView (in-app browser)** supports neither Web Serial nor WebUSB — it will never work.
+- The app uses the **Android USB Host API** (`usb-serial-for-android`), so it does not depend on a
+  browser at all.
 
-- **Živi talasni oblik** (`LiveView`): poslednjih ~5 s signala sa automatskom skalom, pp amplituda i
-  stanje kontakta (DOBAR / SLAB / OTPALA ELEKTRODA / SATURACIJA) — koristi se pre snimanja da se
-  proveri da li su elektrode dobro postavljene.
-- **Povezivanje i snimanje su odvojeni**: `CONNECT` otvara port i samo prikazuje talas; snimanje
-  počinje na `REC_START`, a `REC_STOP` zatvara fajl (veza ostaje otvorena za sledeći snimak).
-- **Automatska pauza kad elektroda otpadne**: ravan signal (< 20 ADC jedinica pp) ili saturacija
-  (> 50 % uzoraka na granici) duže od 3 s → upis se zaustavlja i u CSV ide
-  `# PAUSE t=MM:SS label=elektroda otpala (ravna linija)`; kad kontakt bude dobar 1 s →
-  `# RESUME`. Ručna pauza je odvojeno dugme; auto-pauza se može isključiti.
-- 9600 baud, 8N1 (nema parametara za izbor — naš modul je fiksno tu).
-- Vremenski žig **po uzorku**, ravnomerno 1/192 s unutar pročitanog chunka; nominalna
-  fs 192 Hz (9600 baud / 5 bajtova po liniji).
-- **Markeri faza**: dugmad upisuju `# MARK t=MM:SS label=...` u CSV — servis ih ignoriše
-  (comment `#`), a `ecg_phases.py` ih čita i pripisuje puls uz svaki marker.
-- Auto-reconnect do 20×2 s ako se CH340 resetuje (USB re-enumeracija).
-- Živi prikaz: vreme, broj uzoraka, izmerena fs, procena pulsa.
-- **Pošalji na servis** → multipart POST na `api.php?action=submit` (`data_file`, `fs=192`,
-  `source=android-app`), pa ispis `?action=status`.
-- Fajl ostaje lokalno: `Android/data/org.ecgrecorder/files/ecg/ECG_YYYYmmdd_HHMMSS.csv`
+## Features
 
-## Format snimka
+- **Live waveform** (`LiveView`): the last ~5 s with automatic scaling, peak-to-peak amplitude and
+  a contact state (good / weak / electrode off / saturation) — use it before recording to check
+  electrode placement.
+- **Connect and record are separate**: `CONNECT` opens the port and only displays the waveform;
+  recording starts on `REC_START` and `REC_STOP` closes the file (the connection stays open for the
+  next recording).
+- **Automatic pause when the electrode loses contact**: a flat signal (< 20 ADC units peak-to-peak)
+  or saturation (> 50 % of samples on the rail) for more than 3 s stops the write and puts
+  `# PAUSE t=MM:SS label=elektroda otpala (ravna linija)` in the CSV; after 1 s of good signal a
+  `# RESUME` follows. Manual pause is a separate button, and the auto-pause can be switched off.
+- 9600 baud, 8N1 — no parameters to choose, the module is wired for that rate.
+- A **timestamp per sample**, evenly spaced at 1/192 s inside a read chunk; nominal rate 192 Hz
+  (9600 baud / 5 bytes per line).
+- **Phase markers**: buttons write `# MARK t=MM:SS label=...` into the CSV — the service ignores them
+  (they are `#` comments) while `tools/ecg_phases.py` reads them and attaches the current heart rate
+  to each marker.
+- Auto-reconnect up to 20 × 2 s when the CH340 re-enumerates on USB.
+- Live readout: elapsed time, sample count, measured sample rate, heart-rate estimate.
+- **Upload to the service** → multipart POST to `api.php?action=submit` (`data_file`, `fs=192`,
+  `source=android-app`), then polling `?action=status`.
+- The file stays on the phone: `Android/data/org.ecgrecorder/files/ecg/ECG_YYYYmmdd_HHMMSS.csv`.
+
+## Recording format
 
 ```
 Timestamp,S1
@@ -45,42 +51,56 @@ Timestamp,S1
 # STOP t=06:00 samples=69120 measured_fs=192.00 bad_lines=0
 ```
 
-## Build (bez Android Studio)
+(`label=mirovanje` = "resting"; labels are free text written by the user.)
+
+## Build (without Android Studio)
 
 ```bash
 apt-get install -y unzip openjdk-21-jdk
-# Android SDK (cmdline-tools) u /opt/android-sdk; platform 34 + build-tools 34.0.0
-gradle -p . assembleDebug   # from the android/ directory
+# Android SDK (cmdline-tools) in /opt/android-sdk; platform 34 + build-tools 34.0.0
+gradle -p . assembleDebug          # from the android/ directory
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`local.properties` sadrži `sdk.dir=/opt/android-sdk`.
+`local.properties` holds `sdk.dir=/opt/android-sdk` (not committed — Gradle/Android Studio
+generates it). The project ships without a Gradle wrapper: open it in Android Studio, or run
+`gradle wrapper` once and then use `./gradlew`.
 
-## Verifikacija (bez telefona)
+Set the server address in one place:
+`app/src/main/java/org/ecgrecorder/Uploader.java` → `BASE` (and the dashboard link in
+`MainActivity.java`).
 
-1. `gradle assembleDebug` prolazi → APK postoji.
-2. `aapt2 dump badging app-debug.apk` → paket `org.ecgrecorder`, minSdk 24, targetSdk 34,
-   dozvole (INTERNET, FOREGROUND_SERVICE, FOREGROUND_SERVICE_CONNECTED_DEVICE, WAKE_LOCK).
-3. **Format snimka** je proveren protiv servisa: generisan je CSV tačno u formatu aplikacije
-   (ISO+ms sa offsetom, `# MARK`, `# STOP`) i propušten kroz `ecg_analyze.py`
-   (`--outdir /tmp/...`, ne dira `data/`) → 69.120 uzoraka, fs izmerena 192,0 Hz,
-   „ISO timestamp kolona (69120 različitih vremena)"; markeri ne smetaju.
-4. Isti snimak kroz `ecg_phases.py` → faze 60/100/75 bpm prepoznate tačno, a uz svaki
-   marker ispisan puls u tom trenutku (npr. `2:00.0 posle fizičke aktivnosti → 100.2 bpm`).
-5. **Test auto-pauze**: generisan je snimak u formatu aplikacije sa 30 s pauze (nema uzoraka između
-   150. i 180. s, uz `# PAUSE ... label=elektroda otpala (ravna linija)` i `# RESUME`) →
-   `ecg_phases.py` je prijavio fazu 60 bpm, zatim
-   `PAUZE: 2:30.0-3:00.0 (30 s) elektroda otpala (ravna linija)`, pa fazu 90 bpm; segmenti koji
-   padaju u pauzu se ne tumače (izuzeti iz faza).
+## Verification (no phone needed)
 
-⚠️ **Ceo snimak sa promenom stanja ne sme da se tumači iz glavnog izveštaja servisa**:
-autokorelacija i provera periodičnosti padaju (u testu: „brojanje 75 vs autokorelacija 100,
-razlika 25% → HR nepouzdan"), pa izveštaj (ispravno) odbija tumačenje. Za takve snimke je
-merodavan `ecg_phases.py` (metrike po segmentima/fazama).
+1. `gradle assembleDebug` succeeds → the APK exists.
+2. `aapt2 dump badging app-debug.apk` → package `org.ecgrecorder`, minSdk 24, targetSdk 34,
+   permissions (INTERNET, FOREGROUND_SERVICE, FOREGROUND_SERVICE_CONNECTED_DEVICE, WAKE_LOCK).
+3. **The recording format is tested against the service**: a CSV in exactly the app's format
+   (ISO timestamps with milliseconds and an offset, `# MARK`, `# STOP`) is pushed through
+   `web/ecg_analyze.py --outdir /tmp/...` (which does not touch `data/`) → 69,120 samples,
+   measured rate 192.0 Hz, "ISO timestamp column (69120 distinct times)"; the markers do not
+   disturb the parse.
+4. The same recording through `tools/ecg_phases.py` → the 60/100/75 bpm phases are recognised, and
+   each marker gets the heart rate at that moment (e.g. `2:00.0 → 100.2 bpm`).
+5. **Auto-pause test**: a recording in the app's format with a 30 s pause (no samples between
+   150 s and 180 s, with `# PAUSE ... label=elektroda otpala (ravna linija)` and `# RESUME`) →
+   `ecg_phases.py` reports a 60 bpm phase, then
+   `PAUZE: 2:30.0-3:00.0 (30 s) elektroda otpala (ravna linija)`, then a 90 bpm phase; segments that
+   fall inside the pause are not interpreted.
 
-## Ograničenja
+⚠️ **A recording whose state changes must not be interpreted from the service's single report**:
+autocorrelation and the periodicity check fail (in the test: "count 75 vs autocorrelation 100,
+25 % difference → HR unreliable"), so the report correctly refuses to interpret it. For such
+recordings the authoritative tool is `tools/ecg_phases.py` (per-phase metrics).
 
-- Jedan kanal, AD8232, bez kalibracije u mV → morfologija i ST se ne tumače klinički.
-- Android 14+ zahteva `foregroundServiceType="connectedDevice"` (deklarisano).
-- USB dozvola se traži pri svakom novom priključivanju (osim ako je čekirana).
-- Aplikacija nije na Play Store-u — instalira se kao APK (debug potpis).
+`tools/test_recorder_logic.sh` runs the auto-pause state machine against synthetic signals on a
+desktop JVM (no device, no Android SDK): it compiles the real `Recorder.java` against a stub
+`android.util.Log` and checks pause/resume pairing, that samples are still written inside pauses,
+and that the marker lines carry their numbers.
+
+## Limitations
+
+- One channel, AD8232, no calibration in mV → morphology and ST are not interpreted clinically.
+- Android 14+ requires `foregroundServiceType="connectedDevice"` (declared in the manifest).
+- The USB permission is requested on every new connection (unless it was remembered).
+- The app is not on Play Store — it is installed as an APK (debug signature).

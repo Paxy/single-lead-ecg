@@ -102,6 +102,9 @@ plus calibration and validation against annotated databases is the way out (see
 | [firmware/README.md](firmware/README.md) | firmware behaviour and wire format |
 | [tools/README.md](tools/README.md) | CLI helpers |
 
+All documentation and the Android README are in English; the in-app UI labels and the code
+comments are in Serbian (the project's working language).
+
 ## Privacy
 
 The repository ships **no recordings, no history and no credentials**. `data/` is created at
