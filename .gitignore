@@ -1,0 +1,29 @@
+# runtime data — recordings are personal health data, never commit them
+data/
+web/data/
+*.csv
+!tools/README.md
+
+# generated artifacts
+*.png
+*.apk
+*.jar
+__pycache__/
+*.pyc
+*.log
+job.json
+
+# secrets / local config
+.env
+*.token
+*.key
+secrets/
+*.pw
+
+# android build
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml

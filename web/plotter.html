@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECG — snimanje (Web Serial)</title>
+<style>
+  :root {
+    --bg: #f1f3fa; --card: #ffffff; --ink: #1b1f2a; --muted: #6b7280;
+    --accent: #5b5bd6; --ok: #16a34a; --warn: #d97706; --err: #dc2626;
+    --plot-bg: #10141c; --line: #e4e7f2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  header { background: linear-gradient(135deg, #5b5bd6 0%, #7c3aed 100%); color: #fff; padding: 18px 22px; }
+  header h1 { margin: 0 0 4px; font-size: 1.35rem; font-weight: 600; }
+  header .sub { opacity: .92; font-size: .88rem; }
+  header a { color: #fff; text-decoration: none; border-bottom: 1px dotted rgba(255,255,255,.6); }
+  main { max-width: 1280px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+  .card { background: var(--card); border-radius: 14px; box-shadow: 0 4px 16px rgba(20,25,60,.08); padding: 16px 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 1.02rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+  label { display: block; font-size: .76rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .03em; }
+  input[type=number], select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+        background: #fff; font-size: .92rem; color: var(--ink); }
+  input[type=range] { width: 100%; }
+  button { border: 0; border-radius: 9px; padding: 10px 14px; font-size: .9rem; font-weight: 600;
+           cursor: pointer; background: #eceffb; color: #2b3160; }
+  button:hover:not(:disabled) { filter: brightness(.96); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: linear-gradient(135deg, #5b5bd6, #7c3aed); color: #fff; }
+  button.ok { background: #dcfce7; color: #14532d; }
+  button.danger { background: #fee2e2; color: #7f1d1d; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  canvas { width: 100%; height: 420px; display: block; border-radius: 10px; background: var(--plot-bg); }
+  .stats { display: flex; flex-wrap: wrap; gap: 16px; font-size: .85rem; color: var(--muted); margin-top: 10px; }
+  .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: .82rem; align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+  .pill.idle { background: #eef1f8; color: #4b5563; }
+  .pill.live { background: #dcfce7; color: #166534; }
+  .pill.err { background: #fee2e2; color: #991b1b; }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .msg { margin-top: 10px; padding: 10px 12px; border-radius: 9px; font-size: .87rem; display: none; }
+  .msg.show { display: block; }
+  .msg.info { background: #eef2ff; color: #2b3160; }
+  .msg.ok { background: #dcfce7; color: #14532d; }
+  .msg.err { background: #fee2e2; color: #7f1d1d; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .kpi { background: #f7f8fd; border-radius: 10px; padding: 12px; }
+  .kpi .l { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .v { font-size: 1.3rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kpi .u { font-size: .78rem; color: var(--muted); }
+  pre.report { background: #0f1422; color: #d8e0f5; padding: 14px; border-radius: 10px;
+               max-height: 460px; font-size: .8rem; line-height: 1.45; }
+  .imgs figure { margin: 0 0 14px; }
+  .imgs img { width: 100%; border-radius: 10px; border: 1px solid var(--line); }
+  .imgs figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+  .bar { height: 6px; background: #e5e9f5; border-radius: 99px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#5b5bd6,#7c3aed); transition: width .3s; }
+  details summary { cursor: pointer; font-size: .85rem; color: var(--muted); }
+  pre.report, canvas { overflow: auto; }
+  @media (max-width: 640px) { canvas { height: 300px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ECG — snimanje i analiza</h1>
+  <div class="sub">
+    Akvizicija preko Web Serial API + automatska analiza na serveru &nbsp;·&nbsp;
+    <a href="index.php">← dashboard i istorija snimanja</a>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>1. Izvor signala</h2>
+    <div class="grid">
+      <div>
+        <label for="baud">Baud rate <span id="baudHint" style="text-transform:none;color:#16a34a"></span></label>
+        <select id="baud">
+          <option selected>9600</option><option>19200</option><option>38400</option>
+          <option>57600</option><option>115200</option><option>230400</option>
+          <option>250000</option><option>460800</option><option>921600</option>
+        </select>
+      </div>
+      <div>
+        <label for="fs">Nominalna fs (Hz)</label>
+        <input type="number" id="fs" value="192" min="20" max="20000" step="1">
+      </div>
+      <div class="row">
+        <button id="btnConnect" class="primary">Poveži se na port</button>
+        <button id="btnStopSource" disabled>Prekini izvor</button>
+      </div>
+      <div class="row">
+        <button id="btnAutobaud">Auto-detektuj baud</button>
+        <button id="btnDiag">Dijagnostika porta</button>
+        <button id="btnSim" class="ok">Simulator (bez hardvera)</button>
+        <span id="srcPill" class="pill idle">nema izvora</span>
+      </div>
+      <pre id="diagOut" class="report" style="display:none;margin-top:8px;max-height:240px"></pre>
+      <div>
+        <label for="simHr">Simulator: HR (bpm)</label>
+        <input type="range" id="simHr" min="40" max="140" value="68">
+        <div class="hint">HR: <b id="simHrVal">68</b> bpm</div>
+      </div>
+      <div>
+        <label for="simNoise">Simulator: šum</label>
+        <input type="range" id="simNoise" min="0" max="60" value="8">
+        <div class="hint">šum: <b id="simNoiseVal">8</b></div>
+      </div>
+    </div>
+    <div id="srcMsg" class="msg info"></div>
+    <div class="hint">
+      Snimanje ide <b>direktno iz browsera</b> (Web Serial API): otvori ovu stranu u
+      <b>Chrome-u na mašini na koju je uređaj priključen</b> (računar sa uređajem, <code>/dev/ttyUSB0</code>,
+      CH340, <b>9600 baud</b>, jedan ADC uzorak po liniji, <b>~192 uzorka/s</b> — toliko propušta
+      9600 baud uz 5 bajtova po liniji). Klikni <b>Poveži se na port</b> i izaberi uređaj;
+      ako nisi siguran za brzinu, prvo <b>Auto-detektuj baud</b>.
+      <br>Format linija: <code>616</code> ili više kanala <code>616,590,1024</code>; prva linija
+      može biti zaglavlje sa imenima (<code>S1,S2</code>). <b>Preuzmi CSV</b> daje fajl u formatu
+      <code>Timestamp,S1</code>, a <b>Analiziraj na serveru</b> pokreće analizu.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Snimanje i prikaz</h2>
+    <div class="grid">
+      <div>
+        <label for="win">Prozor prikaza</label>
+        <select id="win">
+          <option value="2">2 s</option><option value="5">5 s</option>
+          <option value="10" selected>10 s</option><option value="30">30 s</option>
+          <option value="0">ceo snimak</option>
+        </select>
+      </div>
+      <div>
+        <label for="filter">Filter PRIKAZA (CSV je uvek sirov)</label>
+        <select id="filter">
+          <option value="none" selected>sirovo</option>
+          <option value="ecg">0.5–40 Hz (ECG)</option>
+          <option value="powerline">0.5–40 Hz + notch 50 Hz</option>
+        </select>
+      </div>
+      <div>
+        <label for="gain">Pojačanje prikaza (×)</label>
+        <input type="number" id="gain" value="1" min="0.1" max="50" step="0.1">
+      </div>
+      <div>
+        <label for="ymode">Y osa</label>
+        <select id="ymode">
+          <option value="auto" selected>auto</option>
+          <option value="fixed">fiksno (0–1024)</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="btnPause">Pauza prikaza</button>
+        <button id="btnClear" class="danger">Očisti</button>
+      </div>
+    </div>
+
+    <canvas id="plot"></canvas>
+    <div class="legend" id="legend"></div>
+    <div class="stats">
+      <span>uzoraka: <b id="nSamples">0</b></span>
+      <span>trajanje: <b id="duration">0.0 s</b></span>
+      <span>izmereni fs: <b id="fsMeas">–</b></span>
+      <span>HR (procena u toku): <b id="hrLive">–</b></span>
+      <span>min/max: <b id="minmax">–</b></span>
+      <span>bafer: <b id="bufPct">0 %</b></span>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <button id="btnCsv" class="ok">Preuzmi CSV</button>
+      <button id="btnAnalyze" class="primary">Analiziraj na serveru</button>
+      <button id="btnLoad">Učitaj CSV kao izvor</button>
+      <input type="file" id="fileIn" accept=".csv,.txt" hidden>
+    </div>
+    <div class="msg" id="actMsg"></div>
+    <div class="hint">
+      Analiza se izvršava kao posao na serveru (neurokit2, delineacija P/QRS/T, HRV,
+      procena kvaliteta). Tipično 5–25 s. Rezultat se prikazuje ispod, a snimak
+      ostaje u istoriji na dashboardu.
+    </div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <h2>3. Rezultat analize <span id="jobPill" class="pill idle">u toku…</span></h2>
+    <div class="bar"><i id="jobBar"></i></div>
+    <div id="jobInfo" class="hint"></div>
+    <div id="kpis" class="kpis" style="margin-top:14px"></div>
+    <div id="interp" style="margin-top:14px; font-size:.9rem; line-height:1.6"></div>
+    <div class="imgs" id="imgs" style="margin-top:16px"></div>
+    <details style="margin-top:12px">
+      <summary>Pun tekstualni izveštaj</summary>
+      <pre class="report" id="reportText" style="margin-top:10px"></pre>
+    </details>
+    <div class="row" style="margin-top:12px">
+      <a href="index.php"><button>Dashboard i istorija snimanja</button></a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hint">
+      <b>Napomena:</b> Web Serial radi u Chrome/Edge/Opera na desktopu, zahteva HTTPS
+      (ovaj servis ga ima) i korisničku dozvolu za port. Podaci se obrađuju na tvom
+      serveru — ništa se ne šalje trećim licima. Rezultat je informativan i nije
+      medicinska dijagnoza.
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* ============================================================================
+   ECG akvizicija: Web Serial / simulator / CSV  →  live prikaz  →  analiza
+   Sve u jednom toku; CSV izlaz je kompatibilan sa formatom "Timestamp,S1".
+   ========================================================================== */
+const CAPACITY = 1500000;                       // uzoraka po kanalu (~2 h @ 192 Hz)
+const COLORS = ["#5b5bd6", "#e11d48", "#0d9488", "#d97706", "#7c3aed", "#0891b2"];
+const $ = (id) => document.getElementById(id);
+
+const S = {
+  series: [],                 // {name, color, data: Float32Array, visible, min, max, last}
+  times: new Float64Array(CAPACITY),
+  n: 0,                       // broj upisanih uzoraka
+  source: null,               // 'serial' | 'sim' | 'csv'
+  port: null, reader: null, keepReading: false,
+  paused: false,
+  nomFs: 192,
+  filtered: null,             // Float32Array filtriranih vrednosti (za prikaz)
+  filters: null,              // biquad stanja
+  liveHr: 0, rr: [], lastBeatMs: 0, env: 0, envT: 0, dcSum: 0, dcBuf: [], dcI: 0,
+  simTimer: null,
+};
+
+/* ------------------------------------------------------------------ kanali -- */
+function ensureSeries(k) {
+  while (S.series.length < k) {
+    const i = S.series.length;
+    S.series.push({ name: "S" + (i + 1), color: COLORS[i % COLORS.length],
+                    data: new Float32Array(CAPACITY).fill(NaN),
+                    visible: true, min: Infinity, max: -Infinity, last: NaN });
+  }
+}
+
+function appendSample(values, tChunk) {
+  if (S.n >= CAPACITY) { stopSource("Bafer je pun (" + CAPACITY.toLocaleString("sr-RS") + " uzoraka) — snimanje je zaustavljeno."); return; }
+  ensureSeries(values.length);
+  const i = S.n;
+  for (let k = 0; k < S.series.length; k++) {
+    const s = S.series[k];
+    const v = k < values.length ? values[k] : NaN;
+    s.data[i] = v;
+    if (Number.isFinite(v)) {
+      if (v < s.min) s.min = v;
+      if (v > s.max) s.max = v;
+      s.last = v;
+    }
+  }
+  S.times[i] = tChunk;
+  if (S.filtered && S.filters) S.filtered[i] = applyFilters(values[0]);
+  S.n++;
+  liveHrStep(Number.isFinite(values[0]) ? S.filtered && S.filters ? S.filtered[i] : values[0] : NaN, tChunk);
+}
+
+function pushLine(line, tChunk) {
+  const t = line.trim();
+  if (!t) return;
+  if (!/\d/.test(t) && /[,;\t ]/.test(t)) {                 // zaglavlje "S1,S2"
+    const names = t.split(/[,;\t ]+/).filter(Boolean);
+    ensureSeries(names.length);
+    names.forEach((nm, i) => { S.series[i].name = nm; });
+    return;
+  }
+  let vals;
+  if (t.includes(":") && /[a-zA-Z]/.test(t)) {              // "ime:123.4"
+    vals = t.split(/[,;\t ]+/).map((p) => parseFloat(p.includes(":") ? p.split(":")[1] : p));
+  } else {
+    vals = t.split(/[,;\t ]+/).map(parseFloat);
+  }
+  vals = vals.filter(Number.isFinite);
+  if (vals.length) appendSample(vals, tChunk);
+}
+
+/* ------------------------------------------------------------------ filteri - */
+function makeFilters(fs, mode) {
+  if (mode === "none") return null;
+  const bq = (type, fc, Q) => {
+    const w0 = 2 * Math.PI * fc / fs, c = Math.cos(w0), s = Math.sin(w0), al = s / (2 * Q);
+    let b0, b1, b2;
+    if (type === "lp") { b0 = (1 - c) / 2; b1 = 1 - c; b2 = (1 - c) / 2; }
+    else if (type === "hp") { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = (1 + c) / 2; }
+    else { b0 = 1; b1 = -2 * c; b2 = 1; }                   // notch
+    const a0 = 1 + al, a1 = -2 * c, a2 = 1 - al;
+    return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0, z1: 0, z2: 0 };
+  };
+  const nyq = fs / 2;
+  return {
+    hp: bq("hp", 0.5, Math.SQRT1_2),
+    lp: bq("lp", Math.min(40, nyq - 1), Math.SQRT1_2),
+    notch: (mode === "powerline" && fs > 110) ? bq("notch", 50, 30) : null,
+  };
+}
+function step(f, x) {
+  const y = f.b0 * x + f.z1;
+  f.z1 = f.b1 * x - f.a1 * y + f.z2;
+  f.z2 = f.b2 * x - f.a2 * y;
+  return y;
+}
+function applyFilters(x) {
+  let v = step(S.filters.hp, x);
+  v = step(S.filters.lp, v);
+  if (S.filters.notch) v = step(S.filters.notch, v);
+  return v;
+}
+function recomputeFiltered() {
+  S.filtered = new Float32Array(CAPACITY);
+  S.filters = makeFilters(currentFs(), $("filter").value);
+  if (!S.filters) return;
+  for (const s of S.series) {
+    // reset stanja filtera da svi kanali krenu iz nule
+  }
+  for (let i = 0; i < S.n; i++) S.filtered[i] = applyFilters(S.series[0].data[i]);
+  resetDetector();
+}
+
+/* --------------------------------------------- procena HR u toku snimanja --- */
+function resetDetector() {
+  S.rr = []; S.lastBeatMs = 0; S.env = 0; S.envT = 0; S.dcBuf = []; S.dcI = 0; S.dcSum = 0; S.liveHr = 0;
+}
+function liveHrStep(v, tMs) {
+  if (!Number.isFinite(v)) return;
+  const fs = Math.max(20, Math.round(currentFs()));
+  const win = Math.round(1.5 * fs);                       // uklanjanje DC/baseline
+  if (S.dcBuf.length < win) { S.dcBuf.push(v); S.dcSum += v; }
+  else { S.dcSum += v - S.dcBuf[S.dcI]; S.dcBuf[S.dcI] = v; S.dcI = (S.dcI + 1) % win; }
+  const x = v - S.dcSum / S.dcBuf.length;
+  if (x > S.env) S.env = x; else S.env *= 0.995;          // opadajući anvelop ~0.7 s
+  if (x <= 0 || x < 0.5 * S.env) return;                  // prag: 50 % anvelope
+  if (!S.lastBeatMs) { S.lastBeatMs = tMs; return; }
+  if (tMs - S.lastBeatMs <= 250) return;                   // refraktarni period
+  const rr = tMs - S.lastBeatMs;
+  if (rr > 300 && rr < 2000) {
+    S.rr.push(rr);
+    if (S.rr.length > 8) S.rr.shift();
+    S.liveHr = 60000 / (S.rr.reduce((a, b) => a + b, 0) / S.rr.length);
+  }
+  S.lastBeatMs = tMs;
+}
+
+/* ---------------------------------------------------------------- izvori ---- */
+/* ------------------------------------------------ dijagnostika Web Serial ---- */
+/* „Poveži se na port” ume da padne bez korisnog objašnjenja (drugi tab drži port,
+   mrtva ručka posle USB reconnecta, `screen` na istoj mašini, pogrešan baud…).
+   Ovde se sve ispiše crno na belo, pa se odmah zna šta je. */
+function hexUsb(v) { return v == null ? "?" : "0x" + v.toString(16).padStart(4, "0"); }
+
+async function describePorts() {
+  const lines = [];
+  lines.push("Web Serial podržan: " + ("serial" in navigator ? "DA" : "NE (treba Chrome/Edge/Opera na desktopu, preko HTTPS)"));
+  if (!("serial" in navigator)) return lines;
+  let ports = [];
+  try { ports = await navigator.serial.getPorts(); } catch (e) { lines.push("getPorts() greška: " + e); return lines; }
+  if (!ports.length) {
+    lines.push("Dozvoljeni portovi: nijedan (uređaj još nije odobren u ovom pregledaču)");
+    return lines;
+  }
+  lines.push("Dozvoljeni portovi (" + ports.length + "):");
+  ports.forEach((p, i) => {
+    const info = p.getInfo ? p.getInfo() : {};
+    lines.push("  " + (i + 1) + ") USB " + hexUsb(info.usbVendorId) + ":" + hexUsb(info.usbProductId) +
+      " | zauzet: " + (p.readable ? "DA — neko ga već čita" : "ne") +
+      (info.usbVendorId === 0x1a86 ? "   ← CH340 (naš ECG uređaj)" : ""));
+  });
+  return lines;
+}
+
+async function closeOwnPort() {
+  /* Zatvaramo SAMO vezu koju je otvorio ovaj tab (npr. ostala posle USB reconnecta).
+     Tuđe veze (drugi tab ili drugi program) se NE diraju — njihovo zatvaranje bi
+     prekinulo čitanje tamo gde radi, i korisnik bi dobio "device has been lost". */
+  const msgs = [];
+  if (S.port && S.port.readable && !S.keepReading) {
+    try { await S.port.close(); msgs.push("Zatvorena stara veza iz ovog taba (port oslobođen)."); }
+    catch (e) { msgs.push("Stara veza iz ovog taba se ne može zatvoriti (" + e + ")."); }
+  }
+  return msgs;
+}
+
+async function diagnoseSerial() {
+  const out = $("diagOut");
+  out.style.display = "block";
+  const log = [];
+  const add = (t) => { log.push(t); out.textContent = log.join("\n"); };
+  add("=== Dijagnostika serijskog porta — " + new Date().toLocaleTimeString() + " ===");
+  (await describePorts()).forEach(add);
+  add("");
+  add("Napomena: ako je neki port gore označen kao „zauzet”, njega drži drugi tab ili program");
+  add("(Chrome drugi tab, `screen`, `minicom`) — zatvori to pa probaj ponovo. Ovaj alat ne dira");
+  add("tuđe veze, jer bi njihovo zatvaranje prekinulo snimanje tamo gde već radi.");
+  if (!("serial" in navigator)) return;
+  const baud = parseInt($("baud").value, 10);
+  add("Tražim dozvolu (u dijalogu izaberi „USB Serial / CH340”)…");
+  let port;
+  try { port = await navigator.serial.requestPort(); }
+  catch (e) { add("Izbor porta otkazan: " + e); return; }
+  const info = port.getInfo ? port.getInfo() : {};
+  add("Izabran: USB " + hexUsb(info.usbVendorId) + ":" + hexUsb(info.usbProductId));
+  try {
+    await port.open({ baudRate: baud, bufferSize: 65536 });
+  } catch (e) {
+    add("OTVARANJE NIJE USPELO na " + baud + " baud: " + e);
+    add("→ Najčešći razlozi:");
+    add("   1) port već drži drugi tab/Chrome ili program na toj mašini (npr. `screen` — izađi sa Ctrl-A pa K)");
+    add("   2) mrtva ručka posle USB reconnecta (CH340) → restart Chrome-a (chrome://restart) ili izvuci/utakni USB");
+    add("   3) korisnik nije u grupi dialout (nema dozvolu za /dev/ttyUSB0)");
+    add("   4) uređaj nije priključen na MAŠINU na kojoj je ovaj browser → Web Serial radi samo lokalno, otvori stranu u Chrome-u na mašini gde je uređaj (računar sa uređajem)");
+    return;
+  }
+  add("Port otvoren na " + baud + " baud. Čitam 2 s…");
+  const dec = new TextDecoder();
+  let buf = "", bytes = 0, numeric = 0, sample = "";
+  const t0 = Date.now();
+  try {
+    const reader = port.readable.getReader();
+    while (Date.now() - t0 < 2000) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split(/\r\n|\r|\n/);
+      buf = parts.pop();
+      for (const l of parts) {
+        if (/^-?\d+(\.\d+)?([,;\t].*)?$/.test(l.trim())) { numeric++; if (!sample) sample = l.trim().slice(0, 40); }
+      }
+    }
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  } catch (e) { add("Greška pri čitanju: " + e); }
+  await port.close().catch(() => {});
+  add("Primljeno: " + bytes + " bajtova; ispravnih linija: " + numeric + " (≈" + Math.round(numeric / 2) + " uzoraka/s)");
+  add("Prvi uzorak: " + (sample || "(nema)"));
+  if (bytes === 0) add("→ Nema podataka: proveri baud (naš uređaj je 9600) i da uređaj stvarno šalje; probaj „Auto-detektuj baud”.");
+  else if (numeric < 10) add("→ Podaci stižu ali nisu brojevi → pogrešan baud (probaj „Auto-detektuj baud”) ili uređaj šalje binarno.");
+  else add("→ Uređaj radi ispravno. Klikni „Poveži se na port” za snimanje.");
+}
+
+async function connectSerial() {
+  if (!("serial" in navigator)) {
+    showMsg("srcMsg", "Ovaj pregledač ne podržava Web Serial (Chrome/Edge/Opera na desktopu). Koristi Simulator ili učitaj CSV.", "err");
+    return;
+  }
+  try {
+    // ne diramo tuđe veze — zatvaramo samo eventualni ostatak iz ovog taba
+    (await closeOwnPort()).forEach((m) => console.log("[ecg-port]", m));
+    const port = await navigator.serial.requestPort();
+    const baud = parseInt($("baud").value, 10);
+    await port.open({ baudRate: baud, bufferSize: 65536 });
+    S.port = port;
+    S.baudUsed = baud;
+    startReading(port);
+    S.source = "serial";
+    setPill("serijski port · " + baud + " baud", "live");
+    showMsg("srcMsg", "Port je otvoren — snimanje teče.", "ok");
+    $("btnStopSource").disabled = false; $("btnConnect").disabled = true;
+    // ako u 4 s ne stigne ni jedan uzorak, najverovatnije je pogrešan baud
+    const n0 = S.n;
+    setTimeout(() => {
+      if (S.source === "serial" && S.n === n0) {
+        showMsg("srcMsg", "Port je otvoren, ali uzorci ne stižu. Proveri baud (ovaj uređaj je 9600 — klikni „Auto-detektuj baud”) " +
+          "i da kabl nije labav. Klikni „Dijagnostika porta” ako i dalje ćuti.", "err");
+      }
+    }, 4000);
+    try {
+      port.addEventListener("disconnect", () => {
+        if (S.keepReading) {
+          showMsg("srcMsg", "Uređaj je odvojen (USB reconnect) — čekam da se vrati i nastavljam sam.", "err");
+        }
+      });
+    } catch (e) {}
+  } catch (err) {
+    const t = String(err);
+    if (t.includes("No port selected") || t.includes("canceled")) return;
+    let hint = "";
+    if (/already open|InvalidStateError|in use|Failed to open/i.test(t)) {
+      hint = " Port je verovatno već otvoren u drugom tabu ili u drugom programu (`screen`) na toj mašini — " +
+        "zatvori te veze (u ovom tabu: „Prekini izvor”), pa probaj ponovo. Klikni „Dijagnostika porta” za detalje.";
+    } else if (/access denied|permission/i.test(t)) {
+      hint = " Nema dozvole za serijski uređaj — na Linuxu korisnik mora biti u grupi `dialout`.";
+    }
+    showMsg("srcMsg", "Greška pri otvaranju porta: " + err + "." + hint, "err");
+    try { (await describePorts()).forEach((l) => console.log("[ecg-port]", l)); } catch (e) {}
+  }
+}
+
+async function startReading(port) {
+  S.keepReading = true;
+  resetDetector();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (S.keepReading && port && port.readable) {
+    S.reader = port.readable.getReader();
+    try {
+      while (true) {
+        const { value, done } = await S.reader.read();
+        if (done) break;
+        const tChunk = Date.now();
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split(/\r\n|\r|\n/);
+        buf = parts.pop();
+        for (const line of parts) pushLine(line, tChunk);   // timestamp po chunku
+      }
+    } catch (err) {
+      if (S.keepReading) {
+        if (isDeviceLost(err)) {
+          // CH340 se sam resetuje (USB reconnect) — stara ručka je mrtva
+          setPill("uređaj izgubljen (USB)", "err");
+          showMsg("srcMsg", "Uređaj je izgubljen: " + err + " — USB se resetovao ili je kabl popustio. " +
+            "Čekam da se vrati i nastavljam sam (ako ne krene za ~40 s, klikni „Poveži se na port”).", "err");
+        } else {
+          showMsg("srcMsg", "Prekid čitanja: " + err, "err");
+        }
+      }
+    } finally {
+      try { S.reader.releaseLock(); } catch (e) {}
+    }
+    if (!S.keepReading) break;
+    if (!port.readable) {
+      const again = await reconnectSerial();
+      if (!again) break;
+      port = again;
+    }
+  }
+}
+
+function isDeviceLost(err) {
+  return /device has been lost|networkerror|device is not|disconnected|no such device|failed to open/i.test(String(err));
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+/* Kad se USB uređaj sam resetuje (CH340 to radi), Chrome-u propadne stara ručka i
+   baca "The device has been lost". Ovde pokušavamo da ponovo otvorimo VEĆ ODOBREN
+   port (bez novog dijaloga) dok se uređaj ne vrati. */
+async function reconnectSerial() {
+  const baud = S.baudUsed || parseInt($("baud").value, 10);
+  if (!("serial" in navigator)) return null;
+  // Mrtva ručka posle „device has been lost” ostaje u Chrome-u kao otvorena i sama
+  // blokira ponovno otvaranje — zato je prvo zatvorimo.
+  try { if (S.port) await S.port.close(); } catch (e) { console.log("[ecg-port] zatvaranje mrtve ručke:", String(e)); }
+  for (let i = 0; i < 20 && S.keepReading; i++) {
+    await sleep(2000);
+    if (!S.keepReading) return null;
+    let list = [];
+    try { list = await navigator.serial.getPorts(); } catch (e) { continue; }
+    for (const p of list) {
+      try {
+        if (p.readable) continue;                      // već otvoren (ne diramo)
+        await p.open({ baudRate: baud, bufferSize: 65536 });
+        S.port = p;
+        setPill("serijski port · " + baud + " baud (ponovo povezan)", "live");
+        showMsg("srcMsg", "Uređaj se vratio — nastavljam snimanje sa istim baferom.", "ok");
+        return p;
+      } catch (e) { /* uređaj još nije spreman */ }
+    }
+  }
+  if (S.keepReading) {
+    setPill("uređaj izgubljen", "err");
+    showMsg("srcMsg", "Uređaj se nije vratio za 40 s. Proveri kabl i USB priključak pa klikni „Poveži se na port”. " +
+                     "Ako i tada prijavi da je port zauzet, osveži stranu (F5) ili restartuj Chrome (chrome://restart) — " +
+                     "time se oslobađa mrtva ručka koju Chrome drži posle USB resetovanja.", "err");
+  }
+  return null;
+}
+
+async function stopSource(reason) {
+  S.keepReading = false;
+  if (S.simTimer) { clearInterval(S.simTimer); S.simTimer = null; }
+  try { await S.reader?.cancel(); } catch (e) {}
+  try { if (S.port) await S.port.close(); } catch (e) {}
+  S.port = null; S.reader = null; S.source = null;
+  setPill("nema izvora", "idle");
+  $("btnStopSource").disabled = true; $("btnConnect").disabled = false; $("btnSim").disabled = false;
+  if (reason) showMsg("srcMsg", reason, "info");
+}
+
+function startSimulator() {
+  const fs = S.nomFs;
+  const periodMs = () => 60000 / (parseFloat($("simHr").value) || 68);
+  const g = (x, mu, s, a) => a * Math.exp(-((x - mu) ** 2) / (2 * s * s));
+  let emitted = 0;                       // broj emitovanih uzoraka
+  let t0 = performance.now();
+  S.simTimer = setInterval(() => {
+    // broj uzoraka se računa iz stvarnog vremena → prosečan fs je tačno nominalan
+    const target = Math.round(fs * (performance.now() - t0) / 1000);
+    const batch = target - emitted;
+    if (batch <= 0) return;
+    const noise = parseFloat($("simNoise").value) || 0;
+    const P = periodMs();
+    const vals = [];
+    for (let k = 0; k < Math.min(batch, 1000); k++) {
+      const tMs = (emitted + k) * 1000 / fs;
+      const ph = (tMs % P) / P;
+      let v = 0.10 * Math.sin(2 * Math.PI * 0.25 * tMs / 1000);
+      v += g(ph, 0.10, 0.022, 0.12);
+      v += g(ph, 0.245, 0.0075, -0.16) + g(ph, 0.27, 0.0075, 1.0);
+      v += g(ph, 0.295, 0.009, -0.22);
+      v += g(ph, 0.45, 0.045, 0.28);
+      v += (Math.random() - 0.5) * noise / 300;
+      vals.push(512 + v * 190);
+    }
+    emitted += vals.length;
+    ensureSeries(1);
+    const tChunk = Date.now();
+    for (const v of vals) appendSample([v], tChunk);   // kao chunk linija sa uređaja
+  }, 33);
+  S.source = "sim";
+  setPill("simulator", "live");
+  $("btnStopSource").disabled = false; $("btnSim").disabled = true;
+  showMsg("srcMsg", "Simulator radi — isti tok obrade kao sa pravim uređajem.", "ok");
+}
+
+function loadCsvFile(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const text = String(rd.result).replace(/^\uFEFF/, "");
+    const lines = text.split(/\r\n|\r|\n/);
+    let count = 0, synth = Date.now() - 60000;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const p = line.split(",");
+      const hasTs = p.length > 1 && Number.isFinite(Date.parse(p[0]));
+      const vals = p.slice(hasTs ? 1 : 0).map((s) => parseFloat(s)).filter(Number.isFinite);
+      if (!vals.length) {
+        if (p.length > 1) {                                  // zaglavlje
+          const names = p.slice(1).map((s) => s.trim()).filter(Boolean);
+          if (names.length) { ensureSeries(names.length); names.forEach((nm, i) => S.series[i].name = nm); }
+        }
+        continue;
+      }
+      appendSample(vals, hasTs ? Date.parse(p[0]) : synth + count * (1000 / S.nomFs));
+      count++;
+    }
+    S.source = "csv";
+    setPill("učitan CSV (" + count.toLocaleString("sr-RS") + " uzoraka)", "live");
+    showMsg("srcMsg", "CSV je učitan kao izvor — možeš ga odmah analizirati.", "ok");
+    $("btnStopSource").disabled = false;
+    resetDetector();
+  };
+  rd.readAsText(file);
+}
+
+/* ------------------------------------------------- automatsko traženje baud - */
+/* Uređaj može da priča na drugoj brzini nego što je izabrano (npr. 9600, a u
+   polju stoji 115200) — tada stižu samo nule/smeće i ništa se ne iscrta.
+   Ovde se port otvara redom na nekoliko brzina i bira ona sa najviše brojeva. */
+async function autoDetectBaud() {
+  if (!("serial" in navigator)) { showMsg("srcMsg", "Web Serial nije podržan u ovom pregledaču.", "err"); return; }
+  if (S.source) stopSource();
+  const candidates = [9600, 19200, 38400, 57600, 115200, 230400];
+  let port;
+  try {
+    port = await navigator.serial.requestPort();
+  } catch (err) { return; }
+  const dec = new TextDecoder();
+  const results = [];
+  for (const b of candidates) {
+    let numeric = 0, bytes = 0, sample = "";
+    try {
+      await port.open({ baudRate: b, bufferSize: 65536 });
+      const reader = port.readable.getReader();
+      const t0 = Date.now();
+      let buf = "";
+      while (Date.now() - t0 < 1200) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split(/\r\n|\r|\n/);
+        buf = parts.pop();
+        for (const line of parts) {
+          const m = line.trim().match(/^-?\d+(\.\d+)?([,;\t].*)?$/);
+          if (m) { numeric++; if (!sample) sample = line.trim().slice(0, 40); }
+        }
+      }
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+      await port.close();
+    } catch (err) {
+      showMsg("srcMsg", "Provera na " + b + " baud nije uspela: " + err, "err");
+      try { await port.close(); } catch (e) {}
+    }
+    results.push({ baud: b, numeric, bytes, sample });
+    showMsg("srcMsg", "Testiram brzine… " + b + " baud: " + numeric + " ispravnih linija", "info");
+  }
+  results.sort((a, b) => b.numeric - a.numeric);
+  const best = results[0];
+  if (!best || best.numeric < 20) {
+    showMsg("srcMsg", "Nijedna brzina ne daje ispravne linije. Proveri kabl/uređaj " +
+      "(dobijeno: " + results.map((r) => r.baud + ":" + r.numeric).join(", ") + ").", "err");
+    return;
+  }
+  $("baud").value = String(best.baud);
+  $("baudHint").textContent = "✓ auto: " + best.baud + " (" + best.numeric + " linija/1.2s)";
+  showMsg("srcMsg", "Najbolja brzina: " + best.baud + " baud — " + best.numeric +
+    " ispravnih linija (primer: " + best.sample + "). Klikni „Poveži se na port”.", "ok");
+}
+
+/* ------------------------------------------------------------------ plot ---- */
+const canvas = $("plot"), ctx = canvas.getContext("2d");
+let colMin = new Float32Array(4096), colMax = new Float32Array(4096);
+
+function currentFs() {
+  if (S.n > 200 && S.times[S.n - 1] > S.times[0]) {
+    const meas = (S.n - 1) / ((S.times[S.n - 1] - S.times[0]) / 1000);
+    if (meas > S.nomFs * 0.4 && meas < S.nomFs * 1.8) return meas;
+  }
+  return S.nomFs;
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#10141c"; ctx.fillRect(0, 0, W, H);
+
+  const padL = 54, padR = 12, padT = 12, padB = 26;
+  const x0 = padL, y0 = padT, w = W - padL - padR, h = H - padT - padB;
+  const fs = currentFs();
+  const winSec = parseFloat($("win").value) || 0;
+  const useFiltered = $("filter").value !== "none" && S.filtered;
+  const gain = parseFloat($("gain").value) || 1;
+  const fixed = $("ymode").value === "fixed";
+
+  const start = winSec > 0 ? Math.max(0, S.n - Math.round(winSec * fs)) : 0;
+  const count = S.n - start;
+
+  const cols = Math.max(1, Math.min(2000, Math.floor(w)));
+  if (colMin.length < cols + 1) { colMin = new Float32Array(cols + 1); colMax = new Float32Array(cols + 1); }
+  const perCol = Math.max(1, Math.ceil(count / cols));
+
+  // 1) decimacija: min/max po koloni (jedan prolaz) + opseg za auto-Y
+  let gmin = Infinity, gmax = -Infinity;
+  const active = [];
+  for (let si = 0; si < S.series.length; si++) {
+    const s = S.series[si];
+    if (!s.visible) { active.push(null); continue; }
+    const arr = useFiltered ? S.filtered : s.data;
+    const buf = new Float32Array(2 * cols).fill(NaN);
+    for (let c = 0; c < cols; c++) {
+      const i0 = start + c * perCol, i1 = Math.min(S.n, i0 + perCol);
+      let mn = Infinity, mx = -Infinity;
+      for (let i = i0; i < i1; i++) {
+        const v = arr[i];
+        if (Number.isFinite(v)) { if (v < mn) mn = v; if (v > mx) mx = v; }
+      }
+      if (mn !== Infinity) {
+        buf[2 * c] = mn; buf[2 * c + 1] = mx;
+        if (mn < gmin) gmin = mn;
+        if (mx > gmax) gmax = mx;
+      }
+    }
+    active.push(buf);
+  }
+  let ymin = 0, ymax = 1024;
+  if (!fixed) {
+    if (!Number.isFinite(gmin) || !Number.isFinite(gmax)) { ymin = 0; ymax = 1024; }
+    else if (gmax - gmin < 20) { const c = (gmax + gmin) / 2; ymin = c - 10; ymax = c + 10; }
+    else { const p = (gmax - gmin) * 0.1; ymin = gmin - p; ymax = gmax + p; }
+  }
+  // pojačanje oko centra
+  const cen = (ymin + ymax) / 2;
+  const yv = (v) => cen + (v - cen) * gain;
+  const Y = (v) => y0 + h - ((yv(v) - yv(ymin)) / ((yv(ymax) - yv(ymin)) || 1)) * h;
+
+  // 2) mreža i ose
+  ctx.font = "11px system-ui, sans-serif"; ctx.lineWidth = 1;
+  ctx.strokeStyle = "#1c2431"; ctx.fillStyle = "#8b97ad";
+  for (let i = 0; i <= 5; i++) {
+    const val = ymin + (ymax - ymin) * i / 5;
+    const yy = Math.round(Y(val)) + .5;
+    ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x0 + w, yy); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(val.toFixed(0), x0 - 6, yy);
+  }
+  for (let i = 0; i <= 10; i++) {
+    const xx = Math.round(x0 + w * i / 10) + .5;
+    ctx.beginPath(); ctx.moveTo(xx, y0); ctx.lineTo(xx, y0 + h); ctx.stroke();
+    const tSec = winSec > 0 ? -winSec * (1 - i / 10) : (i / 10) * (count / fs);
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText((winSec > 0 ? tSec.toFixed(1) : tSec.toFixed(0)) + " s", xx, y0 + h + 6);
+  }
+  ctx.strokeStyle = "#33405a"; ctx.strokeRect(x0 + .5, y0 + .5, w, h);
+
+  // 3) crtanje iz decimiranih kolona
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
+  for (let si = 0; si < S.series.length; si++) {
+    const buf = active[si];
+    if (!buf) continue;
+    ctx.strokeStyle = S.series[si].color; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    let started = false;
+    for (let c = 0; c < cols; c++) {
+      const mn = buf[2 * c], mx = buf[2 * c + 1];
+      if (!Number.isFinite(mn)) { started = false; continue; }
+      const xc = x0 + (c + .5) / cols * w;
+      if (!started) { ctx.moveTo(xc, Y((mn + mx) / 2)); started = true; }
+      else ctx.lineTo(xc, Y(mn));
+      ctx.lineTo(xc, Y(mx));
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  if (S.liveHr) $("hrLive").textContent = S.liveHr.toFixed(0) + " bpm";
+}
+
+function renderLegend() {
+  const el = $("legend");
+  el.innerHTML = S.series.map((s, i) => `<span>
+      <i class="dot" style="background:${s.color}"></i>
+      <label style="display:inline;text-transform:none;letter-spacing:0;margin:0;color:var(--ink);font-size:.85rem">
+        <input type="checkbox" ${s.visible ? "checked" : ""} data-i="${i}" style="margin-right:4px">${s.name}
+      </label>
+      <b style="font-variant-numeric:tabular-nums">${Number.isFinite(s.last) ? s.last.toFixed(0) : "–"}</b>
+    </span>`).join("");
+  el.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.onchange = () => { S.series[+cb.dataset.i].visible = cb.checked; };
+  });
+}
+
+let lastStat = 0;
+function updateStats() {
+  $("nSamples").textContent = S.n.toLocaleString("sr-RS");
+  const fs = currentFs();
+  $("duration").textContent = (S.n / fs).toFixed(1) + " s";
+  const meas = S.n > 100 && S.times[S.n - 1] > S.times[0]
+    ? (S.n - 1) / ((S.times[S.n - 1] - S.times[0]) / 1000) : NaN;
+  $("fsMeas").textContent = Number.isFinite(meas) ? meas.toFixed(1) + " Hz" : "–";
+  let mn = Infinity, mx = -Infinity;
+  for (const s of S.series) { if (s.min < mn) mn = s.min; if (s.max > mx) mx = s.max; }
+  $("minmax").textContent = Number.isFinite(mn) ? mn.toFixed(0) + " / " + mx.toFixed(0) : "–";
+  $("bufPct").textContent = (S.n / CAPACITY * 100).toFixed(0) + " %";
+}
+
+function loop() {
+  if (!S.paused) {
+    draw();
+    if (performance.now() - lastStat > 400) { updateStats(); renderLegend(); lastStat = performance.now(); }
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ------------------------------------------------------------------- CSV ---- */
+function buildCsv() {
+  if (!S.n) return "";
+  const rows = ["Timestamp," + S.series.map((s) => s.name).join(",")];
+  for (let i = 0; i < S.n; i++) {
+    const iso = new Date(S.times[i]).toISOString();
+    const vals = S.series.map((s) => (Number.isFinite(s.data[i]) ? s.data[i] : ""));
+    rows.push(iso + "," + vals.join(","));
+  }
+  return rows.join("\n");
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ---------------------------------------------------------------- analiza --- */
+let pollTimer = null;
+async function analyze() {
+  if (S.n < S.nomFs * 5) { showMsg("actMsg", "Premalo podataka (bar 5 s; za HRV bar 60 s).", "err"); return; }
+  const csv = buildCsv();
+  const fd = new FormData();
+  fd.append("data_file", new Blob([csv], { type: "text/csv" }), "snimak.csv");
+  fd.append("fs", String($("fs").value));
+  fd.append("source", S.source || "serial");
+  showMsg("actMsg", "Šaljem snimak na analizu (" + (csv.length / 1024).toFixed(0) + " KB)…", "info");
+  $("resultCard").style.display = "block";
+  $("jobPill").className = "pill live"; $("jobPill").textContent = "u toku…";
+  $("jobBar").style.width = "12%";
+  $("jobInfo").textContent = "";
+  try {
+    const r = await fetch("api.php?action=submit", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    showMsg("actMsg", "Analiza je pokrenuta (posao " + j.job_id + ").", "ok");
+    pollJob(j.job_id);
+  } catch (err) {
+    $("jobPill").className = "pill err"; $("jobPill").textContent = "greška";
+    showMsg("actMsg", "Analiza nije pokrenuta: " + err.message, "err");
+  }
+}
+function pollJob(id) {
+  clearInterval(pollTimer);
+  let el = 0;
+  pollTimer = setInterval(async () => {
+    el += 2;
+    $("jobBar").style.width = Math.min(88, 12 + el * 4) + "%";
+    try {
+      const j = await (await fetch("api.php?action=status&id=" + encodeURIComponent(id) + "&t=" + Date.now())).json();
+      if (j.state === "done") {
+        clearInterval(pollTimer);
+        $("jobBar").style.width = "100%";
+        $("jobPill").className = "pill live"; $("jobPill").textContent = "završeno (" + el + " s)";
+        renderResult(j);
+        showMsg("actMsg", "Analiza je završena. Snimak je sačuvan u istoriji.", "ok");
+      } else if (j.state === "failed") {
+        clearInterval(pollTimer);
+        $("jobPill").className = "pill err"; $("jobPill").textContent = "neuspeh";
+        $("jobInfo").innerHTML = "Greška: <b>" + (j.error || "nepoznato") + "</b>";
+        showMsg("actMsg", "Analiza nije uspela: " + (j.error || ""), "err");
+      } else {
+        $("jobInfo").textContent = "Obrada u toku… (" + el + " s)";
+      }
+    } catch (e) {}
+  }, 2000);
+}
+
+const ms = (x) => (x === undefined || x === null || !Number.isFinite(x)) ? "–" : (x * 1000).toFixed(0) + " ms";
+function renderResult(job) {
+  const res = job.results || {}, h = res.heart || {}, iv = res.intervals || {},
+        q = res.quality || {}, s = res.sampling || {}, ht = res.hrv?.time || {}, hf = res.hrv?.freq || {};
+  $("jobInfo").innerHTML =
+    "Trajanje <b>" + (s.duration_s ? s.duration_s.toFixed(0) + " s" : "–") + "</b>" +
+    " · uzoraka <b>" + (s.samples || 0).toLocaleString("sr-RS") + "</b>" +
+    " · fs izmerena <b>" + (s.measured_hz ? s.measured_hz.toFixed(1) + " Hz" : "–") + "</b>" +
+    (s.mismatch_pct && s.mismatch_pct > 1 ? " (nominalna " + Number(s.nominal_hz).toFixed(0) + " Hz, odstupanje " + s.mismatch_pct.toFixed(1) + " %)" : "") +
+    " · delineacija <b>" + (iv.delineation_method || "–") + "</b>";
+  const kpi = (l, v, u) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="u">${u || ""}</div></div>`;
+  $("kpis").innerHTML =
+    kpi("HR (medijana)", h.median ? h.median.toFixed(0) : "–", "bpm · srednja " + (h.mean ? h.mean.toFixed(0) : "–")) +
+    kpi("PR", ms(iv.pr?.median), "normalno 120–200 ms") +
+    kpi("QRS", ms(iv.qrs?.median), "normalno ≤ 120 ms") +
+    kpi("QT", ms(iv.qt?.median), "QTc B " + ms(iv.qtc_bazett?.median)) +
+    kpi("QTc (Fridericia)", ms(iv.qtc_fridericia?.median), "normalno ≤ 450 ms") +
+    kpi("SDNN", (ht.sdnn_ms || 0).toFixed(0) + " ms", "ukupna HRV") +
+    kpi("RMSSD", (ht.rmssd_ms || 0).toFixed(0) + " ms", "vagalni tonus") +
+    kpi("LF/HF", hf.lf_hf ? hf.lf_hf.toFixed(2) : "–", "autonomni balans") +
+    kpi("Kvalitet", q.score + "/100", q.label) +
+    kpi("Beatova", h.beats || 0, "odbačeno RR " + (h.rr_artifacts || 0));
+  const item = (t) => t.startsWith("  ") ? `<li style="list-style:none;margin-left:-14px"><i>${t.trim()}</i></li>` : `<li>${t}</li>`;
+  const med = res.medical || {};
+  const ex = res.extra || {};
+  const mb = res.median_beat || {};
+  const htmlList = (arr, cls) => "<ul style='margin:4px 0 0 18px'>" +
+    (arr || []).map((t) => (cls ? `<li style="${cls}">` : "<li>") + t + "</li>").join("") + "</ul>";
+  let extraHtml = "";
+  if (Object.keys(ex).length || mb.qrs_ms) {
+    const rows = [];
+    if (mb.qrs_ms) rows.push(["Medijalni beat (" + (mb.n_beats || "?") + " udara, sličnost " +
+      (mb.template_corr ?? "?") + ")", "QRS " + Math.round(mb.qrs_ms) + " ms" +
+      (mb.p && isFinite(mb.p.pr_ms) ? ", PR " + Math.round(mb.p.pr_ms) + " ms" : "") +
+      (mb.t && mb.t.qt_ms ? ", QT " + Math.round(mb.t.qt_ms) + " ms" : "")]);
+    if (ex.ectopics) rows.push(["Ritam (RR medijana " + Math.round(ex.ectopics.median_rr_ms) + " ms)",
+      "preuranjenih udara: " + ex.ectopics.premature + ", pauza: " + ex.ectopics.pauses]);
+    if (ex.respiration) rows.push(["Disanje", ex.respiration.breaths_per_min + "/min (dominacija " +
+      ex.respiration.dominance_pct + "%)"]);
+    if (ex.nonlinear) rows.push(["Nelinearna HRV", "DFA α1 " + ex.nonlinear.dfa_alpha1 + ", SampEn " +
+      ex.nonlinear.sample_entropy + (ex.nonlinear.orientational ? " (orijentaciono)" : "")]);
+    if (ex.st_trend && ex.st_trend.range_pct_r) rows.push(["ST trend (relativno)",
+      ex.st_trend.range_pct_r[0] + "…" + ex.st_trend.range_pct_r[1] + " %R, " +
+      (ex.st_trend.trend_ok
+        ? ((ex.st_trend.slope_pct_per_min > 0 ? "+" : "") + ex.st_trend.slope_pct_per_min + " %R/min")
+        : "trend se ne ocenjuje (kratak snimak)")]);
+    if ((ex.noise_timeline || []).length) {
+      const worst = ex.noise_timeline.reduce((a, b) => (a.hf_pct > b.hf_pct ? a : b));
+      rows.push(["Najgori deo snimka", Math.round(worst.t0) + "–" + Math.round(worst.t1) + " s (HF šum " + worst.hf_pct + "%)"]);
+    }
+    extraHtml = "<div style='background:#f5f3ff;border-left:4px solid #7c3aed;padding:10px 12px;border-radius:8px;margin-bottom:12px'>" +
+      "<b>Dodatne analize iz snimka</b><table style='width:100%;font-size:.85rem;margin-top:6px'>" +
+      rows.map(([k, v]) => `<tr><td style="color:var(--muted);padding:2px 8px 2px 0">${k}</td><td>${v}</td></tr>`).join("") +
+      "</table></div>";
+  }
+  const medHtml = (med.lines || []).length ?
+    "<div style='background:#eff6ff;border-left:4px solid #2563eb;padding:10px 12px;border-radius:8px;margin-bottom:12px'>" +
+    "<b>Medicinsko tumačenje</b>" + htmlList(med.lines) +
+    ((med.anomalies || []).length ? "<b style='display:block;margin-top:6px'>Odstupanja</b>" + htmlList(med.anomalies, "color:#b91c1c") :
+      "<div style='margin-top:6px;color:#166534'>Nema izmerenih odstupanja od normalnih vrednosti.</div>") +
+    ((med.cannot || []).length ? "<details style='margin-top:6px'><summary style='cursor:pointer'>Šta se ovim snimkom ne može utvrditi</summary>" +
+      htmlList(med.cannot) + "</details>" : "") +
+    ((med.next_steps || []).length ? "<b style='display:block;margin-top:6px'>Preporuke</b>" + htmlList(med.next_steps) : "") +
+    "</div>" : "";
+  $("interp").innerHTML =
+    ((res.layman || []).length ?
+      "<div style='background:#ecfdf5;border-left:4px solid #16a34a;padding:10px 12px;border-radius:8px;margin-bottom:12px'>" +
+      "<b>Objašnjenje bez stručnih izraza</b><ul style='margin:6px 0 0 18px'>" +
+      (res.layman).map((t) => "<li>" + t + "</li>").join("") + "</ul></div>" : "") +
+    medHtml + extraHtml +
+    "<b>Tumačenje</b><ul style='margin:6px 0 0 18px'>" +
+    (res.interpretations || []).map(item).join("") + "</ul>" +
+    (q.notes?.length ? "<b style='display:block;margin-top:10px'>Napomene o kvalitetu</b><ul style='margin:6px 0 0 18px'>" +
+      q.notes.map((t) => "<li>" + t + "</li>").join("") + "</ul>" : "") +
+    "<p style='color:var(--muted);font-size:.82rem;margin-top:10px'>" + (res.disclaimer || "") + "</p>";
+  const bust = "?t=" + Date.now();
+  $("imgs").innerHTML =
+    `<figure><img src="${job.files.report_png}${bust}" alt="izveštaj"><figcaption>Pregled: sirov i filtriran signal sa R vrhovima, RR tachogram, raspodela RR, Poincaré</figcaption></figure>` +
+    `<figure><img src="${job.files.intervals_png}${bust}" alt="intervali"><figcaption>Delineacija i intervali prvih 10 s + medijalni beat</figcaption></figure>`;
+  if (job.report_text) $("reportText").textContent = job.report_text;
+}
+
+/* -------------------------------------------------------------------- UI ---- */
+function showMsg(id, text, cls) {
+  const el = $(id); el.textContent = text; el.className = "msg show " + (cls || "info");
+}
+function setPill(text, cls) { const p = $("srcPill"); p.textContent = text; p.className = "pill " + cls; }
+
+$("btnAutobaud").onclick = autoDetectBaud;
+$("btnDiag").onclick = diagnoseSerial;
+$("btnConnect").onclick = connectSerial;
+$("btnStopSource").onclick = () => stopSource("Izvor zaustavljen.");
+$("btnSim").onclick = () => { if (S.source) stopSource(); startSimulator(); };
+$("btnPause").onclick = (e) => { S.paused = !S.paused; e.target.textContent = S.paused ? "Nastavi prikaz" : "Pauza prikaza"; };
+$("btnClear").onclick = () => {
+  S.n = 0; S.filtered = new Float32Array(CAPACITY);
+  for (const s of S.series) { s.min = Infinity; s.max = -Infinity; s.last = NaN; }
+  resetDetector(); $("hrLive").textContent = "–";
+  showMsg("actMsg", "Bafer je obrisan.", "info");
+};
+$("btnCsv").onclick = () => {
+  const csv = buildCsv();
+  if (!csv) { showMsg("actMsg", "Nema podataka za izvoz.", "err"); return; }
+  download("ecg-" + new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19) + ".csv", csv);
+  showMsg("actMsg", "CSV je preuzet (" + (csv.length / 1024).toFixed(0) + " KB).", "ok");
+};
+$("btnAnalyze").onclick = analyze;
+$("btnLoad").onclick = () => $("fileIn").click();
+$("fileIn").onchange = (e) => { if (e.target.files[0]) { if (S.source) stopSource(); loadCsvFile(e.target.files[0]); } };
+$("filter").onchange = recomputeFiltered;
+$("fs").onchange = () => { S.nomFs = parseFloat($("fs").value) || 192; recomputeFiltered(); };
+$("simHr").oninput = (e) => $("simHrVal").textContent = e.target.value;
+$("simNoise").oninput = (e) => $("simNoiseVal").textContent = e.target.value;
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && e.target.tagName !== "INPUT") { e.preventDefault(); $("btnPause").click(); }
+});
+
+/* start */
+S.nomFs = parseFloat($("fs").value) || 192;
+S.filtered = new Float32Array(CAPACITY);
+ensureSeries(1);
+renderLegend();
+updateStats();
+loop();
+</script>
+</body>
+</html>

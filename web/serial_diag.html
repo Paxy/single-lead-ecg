@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ECG — dijagnostika serial porta (Android/desktop)</title>
+<style>
+ body{font-family:system-ui,Arial,sans-serif;margin:0;padding:14px;background:#0f1720;color:#e8eef5}
+ h1{font-size:1.15rem;margin:0 0 10px}
+ .box{background:#16212b;border-radius:10px;padding:12px;margin-bottom:12px}
+ button{font-size:1.05rem;padding:12px 14px;margin:4px 6px 4px 0;border:0;border-radius:8px;background:#2f6feb;color:#fff}
+ button.sec{background:#37474f}
+ button:disabled{opacity:.5}
+ table{width:100%;border-collapse:collapse;font-size:.92rem}
+ td{padding:5px 3px;border-bottom:1px solid #24313d;vertical-align:top}
+ td:first-child{color:#9fb3c8;width:44%}
+ .ok{color:#39d98a;font-weight:700}
+ .bad{color:#ff6b6b;font-weight:700}
+ .warn{color:#ffcc66;font-weight:700}
+ pre{white-space:pre-wrap;word-break:break-word;font-size:.85rem;background:#0b1219;padding:9px;border-radius:8px}
+ .big{font-size:1.1rem}
+</style>
+</head>
+<body>
+<h1>ECG dijagnostika — šta telefon/browser vidi</h1>
+<div class="box big" id="verdict">Klikni „Proveri podršku“.</div>
+<div class="box"><button onclick="proveri()">1. Proveri podršku</button>
+<button class="sec" onclick="trazi()">2. Traži port (OTG)</button>
+<button class="sec" onclick="snimi()">3. Snimi 5 s</button>
+<button class="sec" onclick="posalji(1)">4. Pošalji nalaz na server</button></div>
+<div class="box"><table id="t"></table></div>
+<div class="box"><pre id="log"></pre></div>
+<script>
+const R = {ua: navigator.userAgent, uaData: null, hasSerial: ('serial' in navigator),
+           hasUsb: ('usb' in navigator), isWebView: false, chrome: null,
+           ports: null, portInfo: null, readTest: null, errors: []};
+try { if (navigator.userAgentData) R.uaData = {mobile: navigator.userAgentData.mobile, platform: navigator.userAgentData.platform}; } catch(e){}
+R.isWebView = /\bwv\b/.test(R.ua) || (!/Chrome\//.test(R.ua) && /Android/.test(R.ua) && /Version\//.test(R.ua));
+try { const m = R.ua.match(/Chrome\/(\d+)/); R.chrome = m ? parseInt(m[1]) : null; } catch(e){}
+let port = null, drzan = null;
+
+function log(s){ document.getElementById('log').textContent += s + '\n'; }
+
+function red(tbl){
+  const rows = [
+    ['WebView (in-app browser)', R.isWebView ? '<span class="bad">DA — tu ne radi</span>' : '<span class="ok">ne</span>'],
+    ['Chrome verzija', (R.chrome||'?') + (R.chrome && R.chrome>=148 ? ' <span class="ok">(>=148: Web Serial postoji)</span>' : (R.chrome? ' <span class="warn">(<148: treba polyfill)</span>':''))],
+    ['navigator.serial', R.hasSerial ? '<span class="ok">postoji</span>' : '<span class="bad">nema</span>'],
+    ['navigator.usb (WebUSB)', R.hasUsb ? '<span class="ok">postoji</span>' : '<span class="bad">nema</span>'],
+    ['Secure context (https)', window.isSecureContext ? '<span class="ok">da</span>' : '<span class="bad">ne</span>'],
+    ['Dozvole (getPorts)', R.ports === null ? '-' : R.ports + ' port(ova)'],
+    ['Izabran port', R.portInfo || '-'],
+    ['Test čitanja 5 s', R.readTest || '-'],
+    ['Greške', R.errors.length ? '<span class="warn">'+R.errors.join(' | ')+'</span>' : 'nema'],
+  ];
+  document.getElementById('t').innerHTML = rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+  const v = document.getElementById('verdict');
+  if (R.isWebView) v.innerHTML = 'Otvori ovu stranu u <b>pravom Chrome-u</b> (adresna traka, ne unutar aplikacije). In-app browser = WebView i ne podržava Web Serial/WebUSB.';
+  else if (R.hasSerial) v.innerHTML = 'Podrška postoji (Web Serial). <b>Klikni 2, pa 3.</b>';
+  else if (R.hasUsb) v.innerHTML = 'Nema Web Serial, ali <b>ima WebUSB</b> → rešava se polyfill-om u plotteru (bez Android aplikacije).';
+  else v.innerHTML = 'Ni Web Serial ni WebUSB — proveri da li je pravi Chrome i da li je OTG priključen.';
+}
+
+async function proveri(){
+  try { if (navigator.serial && navigator.serial.getPorts) R.ports = (await navigator.serial.getPorts()).length; } catch(e){ R.errors.push('getPorts: '+e.message); }
+  red(); log('proveri: ' + new Date().toISOString());
+  posalji(0);
+}
+
+async function trazi(){
+  if (!navigator.serial) { log('nema navigator.serial — vidi odluku gore'); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    const inf = port.getInfo ? port.getInfo() : {};
+    R.portInfo = 'VID ' + (inf.usbVendorId!==undefined?('0x'+inf.usbVendorId.toString(16)):'?') +
+                 ' PID ' + (inf.usbProductId!==undefined?('0x'+inf.usbProductId.toString(16)):'?');
+    log('port izabran: ' + R.portInfo);
+  } catch(e){ R.errors.push('requestPort: '+e.message); log('greška: '+e.message); }
+  red(); posalji(0);
+}
+
+async function snimi(){
+  if (!port) { log('prvo „2. Traži port“'); return; }
+  try {
+    await port.open({baudRate: 9600});
+    const reader = port.readable.getReader();
+    const t0 = Date.now(); let bytes = 0, lines = 0, nums = 0, head = [];
+    const dec = new TextDecoder(); let buf = '';
+    while (Date.now() - t0 < 5000) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0,i).replace(/\r/g,'').trim(); buf = buf.slice(i+1);
+        if (!line) continue;
+        lines++;
+        if (/^\d+$/.test(line)) { nums++; if (head.length<5) head.push(line); }
+      }
+    }
+    reader.releaseLock();
+    await port.close();
+    R.readTest = `${lines} linija, ${nums} brojeva u 5 s, prvih: ${head.join(',')||'-'}`;
+    R.fsEstimate = nums ? Math.round(nums/5) : 0;
+    log('čitanje OK: ' + R.readTest + '  (~' + R.fsEstimate + ' uzoraka/s)');
+  } catch(e){ R.errors.push('read: '+e.message); log('greška pri čitanju: '+e.message); }
+  red(); posalji(0);
+}
+
+function posalji(){
+  try {
+    fetch('diag.php', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({src:'serial_diag', t:new Date().toISOString(), data:R})})
+      .then(r=>r.text()).then(x=>{ log('poslato na server: ' + x); })
+      .catch(e=>{ log('slanje nije uspelo: ' + e.message); });
+  } catch(e){ log('slanje nije uspelo: ' + e.message); }
+}
+red();
+</script>
+</body>
+</html>
